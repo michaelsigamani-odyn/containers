@@ -1,0 +1,60 @@
+# ============================================================
+# DGX Spark (london) — arm64
+# Roles: slurmctld + slurmd + slurmdbd + MariaDB + sackd
+# Federation: odyn  (london + united-states)
+# ============================================================
+FROM arm64v8/ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    slurm-wlm=23.11.4* \
+    slurmdbd=23.11.4* \
+    munge \
+    mariadb-server \
+    python3 \
+    supervisor \
+    curl \
+    iputils-ping \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Munge ────────────────────────────────────────────────────
+# In production, copy the same munge.key to all nodes
+RUN dd if=/dev/urandom bs=1 count=1024 > /etc/munge/munge.key \
+    && chown munge:munge /etc/munge/munge.key \
+    && chmod 400 /etc/munge/munge.key
+
+# ── Slurm directories ────────────────────────────────────────
+RUN mkdir -p \
+        /var/log/slurm \
+        /var/lib/slurm/slurmctld \
+        /var/lib/slurm/slurmd \
+        /run/slurmctld \
+        /run/slurmdbd \
+        /run/slurm \
+    && chown -R slurm:slurm \
+        /var/log/slurm \
+        /var/lib/slurm \
+        /run/slurmctld \
+        /run/slurmdbd \
+        /run/slurm
+
+# ── Slurm config ─────────────────────────────────────────────
+COPY slurm.conf    /etc/slurm/slurm.conf
+COPY slurmdbd.conf /etc/slurm/slurmdbd.conf
+RUN chown slurm:slurm /etc/slurm/slurm.conf /etc/slurm/slurmdbd.conf \
+    && chmod 600 /etc/slurm/slurmdbd.conf
+
+# ── MariaDB bootstrap ────────────────────────────────────────
+COPY init-db.sql /docker-entrypoint-initdb.d/init-db.sql
+
+# ── Supervisord: start all daemons ───────────────────────────
+COPY supervisord.conf /etc/supervisor/conf.d/slurm.conf
+
+# ── Entrypoint: patches /etc/hosts + bootstraps DB at runtime ──
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 6817 6818 6819
+
+ENTRYPOINT ["/entrypoint.sh"]

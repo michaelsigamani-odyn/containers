@@ -1,0 +1,47 @@
+# ============================================================
+# H100 (united-states) — amd64
+# Roles: slurmctld + slurmd
+# Accounting: points to spark-8d8a (london) slurmdbd
+# Federation: odyn  (london + united-states)
+# ============================================================
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    slurm-wlm=23.11.4* \
+    munge \
+    python3 \
+    supervisor \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Munge ────────────────────────────────────────────────────
+# IMPORTANT: replace with the same munge.key from the spark node
+#   docker cp spark:/etc/munge/munge.key ./munge.key
+#   Then: COPY munge.key /etc/munge/munge.key
+RUN dd if=/dev/urandom bs=1 count=1024 > /etc/munge/munge.key \
+    && chown munge:munge /etc/munge/munge.key \
+    && chmod 400 /etc/munge/munge.key
+
+# ── Slurm directories ────────────────────────────────────────
+RUN mkdir -p \
+        /var/log/slurm \
+        /var/lib/slurm/slurmctld \
+        /var/lib/slurm/slurmd \
+        /run/slurm \
+    && chown -R slurm:slurm \
+        /var/log/slurm \
+        /var/lib/slurm \
+        /run/slurm
+
+# ── Slurm config ─────────────────────────────────────────────
+COPY slurm.conf /etc/slurm/slurm.conf
+RUN chown slurm:slurm /etc/slurm/slurm.conf
+
+# ── Supervisord ──────────────────────────────────────────────
+COPY supervisord.conf /etc/supervisor/conf.d/slurm.conf
+
+EXPOSE 6817 6818
+
+CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
